@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#2258aa">
+<meta name="description" content="校園臨打成團、限時候補與出席分攤">
+<title>RallyReady · 揪團，不再靠猜</title>
+<link rel="manifest" href="/manifest.webmanifest"><link rel="icon" href="/icon.svg">
+<link rel="apple-touch-icon" href="/icon-192.png"><link rel="stylesheet" href="/styles.css">
+<script src="/app.js" defer></script>
+</head>
+<body>
+<div id="offline" class="offline hidden">目前離線 · 只保留操作介面，不會快取個人資料或代送報名。</div>
+<header><a class="brand" href="/">Rally<span>Ready.</span></a>
+<span class="subtitle">MAKE THE GAME HAPPEN</span>
+<nav aria-label="帳號操作"><button id="install" class="secondary hidden">安裝</button><span id="identity" class="identity">訪客</span><button id="auth">登入 / 註冊</button><button id="logout" class="secondary hidden">登出</button></nav></header>
+<main><div class="empty">正在讀取資料…</div></main>
+<footer>不代收款、不保證出席；站內通知並非背景推播。<br>原創 AI 協作作品集初版 · 可自架 · PWA 安裝方式依瀏覽器而異</footer>
+<dialog aria-labelledby="auth-title"><h2 id="auth-title">從一次成團開始</h2><p class="muted">示範用帳號，不需要提供電話或電子郵件。</p>
+<form id="auth-form" class="stack"><label>帳號（3–32 字，英數或底線）<input name="username" autocomplete="username" pattern="[a-zA-Z0-9_]{3,32}" required></label>
+<label>密碼（至少 10 字，請勿重用真實密碼）<input name="password" type="password" minlength="10" maxlength="128" autocomplete="current-password" required></label>
+<label>暱稱（註冊使用）<input name="nickname" maxlength="30" value="新朋友" required></label>
+<div class="row"><button type="submit" data-mode="login">登入</button><button type="submit" data-mode="register" class="secondary">建立帳號</button><button type="button" id="close-auth" class="link">關閉</button></div></form></dialog>
+<div id="message" role="alert" aria-live="polite"></div>
+</body></html>
+
