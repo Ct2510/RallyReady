@@ -4,6 +4,21 @@ import vm from "node:vm";
 import {startUI,flush} from "./ui_test_helper.mjs";
 
 const directory=new URL("./",import.meta.url);
+test("Any API response started before logout is rejected, not handed to its caller",async()=>{
+  const fixture=fixtures();fixture.login();
+  let hold=false,release;
+  const respond=async(path,options)=>{
+    const result=await fixture.respond(path,options);
+    if(path==="/api/notifications"&&hold){hold=false;return new Promise(resolve=>{release=()=>resolve(result);});}
+    return result;
+  };
+  const ui=await startUI(directory,respond);
+  hold=true;
+  const pending=vm.runInContext("api('/notifications')",ui.context);
+  await flush();await ui.click("#logout");
+  const rejected=assert.rejects(pending,/工作階段已變更/);
+  release();await rejected;
+});
 test("An earlier in-flight session response cannot restore identity after logout",async()=>{
   const fixture=fixtures();fixture.login();
   let hold=false,release;

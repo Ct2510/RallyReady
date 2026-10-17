@@ -2,6 +2,7 @@ const main = document.querySelector("main");
 const dialog = document.querySelector("dialog");
 const message = document.querySelector("#message");
 let messageTimer;
+let sessionEpoch=0;
 function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, character => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[character]));
 }
@@ -12,6 +13,7 @@ function toast(value) {
   messageTimer = setTimeout(() => message.classList.remove("visible"), 6500);
 }
 async function api(path, method = "GET", body) {
+  const requestEpoch=sessionEpoch;
   if (!navigator.onLine) throw new Error("目前離線：只能查看介面，操作尚未送出，請連線後重試。");
   let response;
   try {
@@ -21,6 +23,7 @@ async function api(path, method = "GET", body) {
     throw new Error("無法連上伺服器，操作未確認；請重新整理確認狀態後再試。");
   }
   const result = await response.json();
+  if(requestEpoch!==sessionEpoch)throw new Error("工作階段已變更，已忽略先前請求的回應。");
   if (!response.ok) throw new Error(typeof result.detail === "string" ? result.detail : "資料格式不正確，請檢查所有欄位。");
   return result;
 }
@@ -55,6 +58,7 @@ document.querySelector("#auth-form").addEventListener("submit", async event => {
   try {
     const values = Object.fromEntries(new FormData(event.target));
     await api(button.dataset.mode === "register" ? "/register" : "/login", "POST", values);
+    sessionEpoch++;
     dialog.close();
     event.target.reset();
     await load();
@@ -170,6 +174,7 @@ async function load(eventId, selectFirst=false){
   loading=true;
   const resolved=await api("/me").catch(()=>null);
   if(requestSequence!==loadSequence)return;
+  if(!resolved&&user)sessionEpoch++;
   user=resolved;
   if(!user){notifications=[];selected=null;clearSensitiveDialogs();if(screen==="mine")events=[];render();}
   const parameters=new URLSearchParams({sport,q:searchText,include_past:String(includePast),only_joinable:String(onlyJoinable)});
@@ -201,7 +206,7 @@ function clearSensitiveDialogs(){
   document.querySelector("#notifications-dialog").innerHTML="";
   confirmation=null;
 }
-function clearPrivateState(){loadSequence++;user=null;selected=null;notifications=[];events=[];formDraft=null;announcementDrafts={};screen="discover";detailOpened=false;clearSensitiveDialogs();render();}
+function clearPrivateState(){sessionEpoch++;loadSequence++;user=null;selected=null;notifications=[];events=[];formDraft=null;announcementDrafts={};screen="discover";detailOpened=false;clearSensitiveDialogs();render();}
 function requestConfirmation(text,callback){
   confirmation=callback;document.querySelector("#confirm-description").textContent=text;document.querySelector("#confirm-dialog").showModal();
 }

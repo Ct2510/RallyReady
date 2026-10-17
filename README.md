@@ -84,7 +84,7 @@ npm ci --ignore-scripts --no-audit --no-fund
 npm test
 ```
 
-Node 22+ 僅用於測試。v1.1 本機 **47 項 Python + 11 項 Node 測試**通過：平行報名不超額、FIFO／逾期、成團、出席結算、整數餘數、行事曆與 session 安全，加上清單篩選、我的活動隔離、等待順位、公告授權／冪等／通知。LinkeDOM + 模擬 API 測試日期帶、篩選事件、草稿、登出與過期回應不還原身份；不是實際瀏覽器端到端、視覺或背景通知測試。CI 設定 Windows / Ubuntu × Python 3.11 / 3.12 / 3.13，實際遠端結果以 [Actions](https://github.com/Ct2510/RallyReady/actions) 為準。
+Node 22+ 僅用於測試。v1.1 本機 **47 項 Python + 12 項 Node 測試**通過：平行報名不超額、FIFO／逾期、成團、出席結算、整數餘數、行事曆與 session 安全，加上清單篩選、我的活動隔離、等待順位、公告授權／冪等／通知。LinkeDOM + 模擬 API 測試日期帶、篩選事件、草稿、登出與過期回應不還原身份；不是實際瀏覽器端到端、視覺或背景通知測試。CI 設定 Windows / Ubuntu × Python 3.11 / 3.12 / 3.13，實際遠端結果以 [Actions](https://github.com/Ct2510/RallyReady/actions) 為準。
 
 ## 架構及限制
 
