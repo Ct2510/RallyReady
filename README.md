@@ -4,9 +4,17 @@
 
 給校園臨打主辦人的手機優先網頁 App：把「說要來」拆成**已確認、候補保留、實際出席**三種不同承諾。人數不足時清楚顯示風險，而不是讓大家到場才發現成不了團。
 
-全新 AI 協作作品集初版，不是先前 Flutter 課程作業的原始碼重建。未串接真實場館、收款、Email 或背景推播；示範資料全部虛構，沒有真實使用者或節省工時數據。
+全新 AI 協作作品集 v1.1，不是先前 Flutter 課程作業的原始碼重建。未串接真實場館、收款、Email 或背景推播；示範資料全部虛構，沒有真實使用者或節省工時數據。
 
-![RallyReady 操作介面](screenshot.jpg)
+## v1.1：校園臨打看板，不是另一份卡片樣板
+
+- **不同的 UI 語言**：深墨綠／萊姆黃、日期帶、按日分組的球局清單與人數計分板；手機採清單／詳情兩個畫面，不把操作壓在長卡片下方。
+- **找球局／我的球局分開**：依運動、名稱／場地、七日日期帶、可報名狀態篩選，另外查看本人主辦或曾報名的活動。
+- **候補更清楚**：顯示等待順位、名額保留倒數與本人接受按鈕；倒數只是提示，接受仍由伺服器裁決。
+- **主辦公告**：限主辦發布、參與者可讀；寫入站內通知，重試使用同一請求碼，不重複發布／通知。
+- **更安全的操作**：退出／取消／結算再次確認；建立表單保留本次頁面草稿，登出清除草稿與私人通知。開頁時每 30 秒檢查站內通知，不改寫正在填的表單，不冒充推播。
+
+實際參考與取捨見 [UIUX.md](UIUX.md)。本版尚未完成實際瀏覽器桌機／手機視覺驗收；[舊版截圖](screenshot.jpg) 僅記錄 v1.0，不代表此版 UI。
 
 ## 為什麼不是普通報名表
 
@@ -64,7 +72,7 @@ macOS / Linux 的 Python 路徑改為 `.venv/bin/python`。瀏覽 <http://127.0.
 .venv\Scripts\python maintenance.py
 ```
 
-本 Repository 提供一次性維護命令，**沒有替使用者安裝排程**。通知是站內資料，須重新整理查看，未接入寄信或推播服務；不要把它當緊急通知管道。
+本 Repository 提供一次性維護命令，**沒有替使用者安裝排程**。通知是站內資料；頁面可見且未開對話框時，每 30 秒檢查通知數並提示更新，完整狀態仍需更新／開啟通知。未接入寄信或推播服務；不要把它當緊急通知管道。
 
 ## 測試
 
@@ -72,10 +80,11 @@ macOS / Linux 的 Python 路徑改為 `.venv/bin/python`。瀏覽 <http://127.0.
 .venv\Scripts\python -m pip install -r requirements-dev.lock.txt
 .venv\Scripts\python -m pytest -q
 node --check app.js
-node --test test_browser.mjs
+npm ci --ignore-scripts --no-audit --no-fund
+npm test
 ```
 
-Node 22+ 用於 PWA 測試。初版驗證項目 **41 項 Python 測試、5 項 PWA 測試**，包括平行報名不超額、平行接受不重複、FIFO／逾期、重排、截止不足取消、取消通知、主辦權限、名單隱私、簽到、不可變結算、整數餘數、行事曆注入防護與 session 安全。CI 設定 Windows / Ubuntu × Python 3.11 / 3.12 / 3.13，實際遠端結果以 [Actions](https://github.com/Ct2510/RallyReady/actions) 為準。
+Node 22+ 僅用於測試。v1.1 本機 **47 項 Python + 11 項 Node 測試**通過：平行報名不超額、FIFO／逾期、成團、出席結算、整數餘數、行事曆與 session 安全，加上清單篩選、我的活動隔離、等待順位、公告授權／冪等／通知。LinkeDOM + 模擬 API 測試日期帶、篩選事件、草稿、登出與過期回應不還原身份；不是實際瀏覽器端到端、視覺或背景通知測試。CI 設定 Windows / Ubuntu × Python 3.11 / 3.12 / 3.13，實際遠端結果以 [Actions](https://github.com/Ct2510/RallyReady/actions) 為準。
 
 ## 架構及限制
 
@@ -87,4 +96,4 @@ FastAPI / Pydantic / SQLite / 原生 JavaScript。詳見 [ARCHITECTURE.md](ARCHI
 
 ## 原創與參考
 
-功能研究參考 OpenSports、Meetup、pickup、Sports Club Manager；沒有複製他們的程式、圖片、介面或資料。研究範圍與授權查核見 PRODUCT.md。本 Repository 尚未另選開源授權，公開不代表任意再利用；依賴套件遵循各自授權。
+功能研究參考 OpenSports、Meetup、pickup、Sports Club Manager；本版 UI 另參考 Luma、Partiful 與 OpenLuma 的資訊階層及狀態表達，沒有複製其程式、圖片、版面或資料。研究見 PRODUCT.md、UIUX.md。本 Repository 尚未另選開源授權，公開不代表任意再利用；Python 依賴依各自授權，測試依賴 LinkeDOM（ISC）及鎖檔相依，不上傳 node_modules。

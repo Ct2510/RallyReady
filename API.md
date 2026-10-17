@@ -6,7 +6,8 @@
 |---|---|
 | POST `/api/register`、`/api/login`、`/api/logout` | 帳號與工作階段 |
 | GET `/api/me` | 目前使用者 |
-| GET `/api/events` | 公開活動摘要，最多 100 筆，查詢時整理期限 |
+| GET `/api/events` | 公開活動摘要；sport、q、include_past=false、only_joinable=false，最多 100 筆，查詢時整理期限 |
+| GET `/api/my-events` | 登入；本人主辦／曾報名活動，含 my_status、is_host，含過去活動，最多 100 筆 |
 | POST `/api/events` | 登入者建立活動，不自動佔位 |
 | GET `/api/events/{id}` | 公開摘要 + 本人狀態；依權限加名單及主辦流程紀錄 |
 | POST `/api/events/{id}/join` | 尚未截止：直接確認或加入候補；重複有效報名不新增 |
@@ -18,6 +19,7 @@
 | GET `/api/notifications` | 本人最近 50 則通知，亦整理相關未截止活動 |
 | POST `/api/notifications/{id}/read` | 只有本人可標已讀 |
 | GET `/api/events/{id}/calendar.ics` | 公開活動資訊下載，不含參與者 |
+| POST `/api/events/{id}/announcements` | 僅主辦，未取消／未結算；text、request_id；公告與站內通知同交易提交 |
 
 建立活動範例（請換成當時的未來時間）：
 
@@ -35,3 +37,9 @@
 2 ≤ minimum ≤ capacity ≤ 32；截止 < 開始 < 結束，最長 24 小時，開始在一年內。整數費用 0–100000，候補期限 1–120 分鐘且不得超過成團截止。未知欄位或不帶時區回 422；未登入 401、主辦權限不足 403、找不到 404、領域衝突 409、節流 429。
 
 我的報名欄位 mine 可能是 null，或含 status、deadline。deadline 只對 offered 有意義。等待與已保留是不同狀態；使用者須看實際回應，不能把所有 200 都當「已確認參加」。
+
+v1.1：waiting 另有 `queue_position`（不含 offered）。摘要的 `server_time` 供前端校正倒數；最終資格仍以接受 API 為準，不以裝置時鐘為準。名單與公告只供主辦／曾報名者，未參與訪客不取得公告。
+
+公告範例：`{"text":"已確認使用二號場，請帶室內鞋。","request_id":"unique-request-0001"}`。text 3～500 字；request_id 16～80 字英數／連字號。每場上限 30 則；同活動、同 request_id、同內容重送回同筆，不重複通知；同碼不同內容 409。通知對象為目前 confirmed／waiting／offered／checked_in 參與者，排除作者。前端只保留頁面內草稿，關閉後不能保證跨裝置冪等重試。
+
+清單查詢先取依時間排序最多 200 場候選再整理期限／篩選並輸出 100 場；不是完整大型歷史搜尋或分頁系統。q 採字面子字串搜尋，不把 `%`／`_` 當 wildcard；不支援模糊搜尋排名。

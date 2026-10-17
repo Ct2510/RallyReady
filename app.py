@@ -2,11 +2,11 @@ import json
 import os
 from datetime import datetime, timezone
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response
 
 from common import Store, dump, setup
-from domain import EventInput, audit, cancel_all, event_row, identifier, notify, reconcile, split_cost
+from domain import AnnouncementInput, EventInput, audit, cancel_all, event_row, identifier, notify, reconcile, split_cost
 
 
 def create_app(path=None, clock=None):
@@ -32,8 +32,13 @@ def create_app(path=None, clock=None):
             CREATE TABLE IF NOT EXISTS audit (
                 id INTEGER PRIMARY KEY, event TEXT REFERENCES events(id), action TEXT, created INTEGER, details TEXT
             );
+            CREATE TABLE IF NOT EXISTS announcements (
+                id TEXT PRIMARY KEY, event TEXT REFERENCES events(id), author TEXT REFERENCES users(id),
+                text TEXT NOT NULL, request_id TEXT NOT NULL, created INTEGER NOT NULL,
+                UNIQUE(event,request_id)
+            );
         """)
-    app = FastAPI(title="RallyReady", version="1.0.0", docs_url=None, redoc_url=None)
+    app = FastAPI(title="RallyReady", version="1.1.0", docs_url=None, redoc_url=None)
     app.state.store = store
     current = setup(app, store, "RallyReady")
 
@@ -52,15 +57,43 @@ def create_app(path=None, clock=None):
             state = "ready" if confirmed >= event["minimum"] else ("at_risk" if event["was_ready"] else "recruiting")
         return {key: event[key] for key in ("id", "title", "sport", "venue", "starts_at", "ends_at", "cutoff_at",
                                             "capacity", "minimum", "total_cost", "offer_minutes", "backup_plan")} | {
-            "state": state, "confirmed": confirmed, "offered": counts.get("offered", 0), "waiting": counts.get("waiting", 0),
+            "state": state, "confirmed": confirmed, "offered": counts.get("offered", 0), "waiting": counts.get("waiting", 0), "server_time": int(store.clock()),
             "estimated_cost": (event["total_cost"] + confirmed - 1) // confirmed if confirmed else None,
             "host_name": connection.execute("SELECT nickname FROM users WHERE id=?", (event["host"],)).fetchone()[0]}
 
     @app.get("/api/events")
-    def events():
+    def events(sport: str = Query(default="", max_length=10), search_query: str = Query(default="", alias="q", max_length=100),
+               include_past: bool = False, only_joinable: bool = False):
+        if sport and sport not in {"羽球", "籃球", "排球", "桌球", "其他"}:
+            raise HTTPException(422, "未知運動類別")
         with store.transaction() as connection:
-            rows = connection.execute("SELECT id FROM events ORDER BY starts_at LIMIT 100").fetchall()
-            return [summary(connection, reconcile(connection, row["id"], int(store.clock()))) for row in rows]
+            now = int(store.clock())
+            rows = connection.execute(
+                "SELECT id FROM events WHERE (?='' OR sport=?) AND (?=1 OR ends_at>=?) "
+                "AND (?='' OR instr(lower(title || ' ' || venue),lower(?))>0) "
+                "ORDER BY starts_at>=? DESC, starts_at LIMIT 200",
+                (sport, sport, int(include_past), now, search_query, search_query, now)).fetchall()
+            results = [summary(connection, reconcile(connection, row["id"], now)) for row in rows]
+            if only_joinable:
+                results = [item for item in results if item["state"] in {"recruiting", "ready", "at_risk"}]
+            return results[:100]
+
+    @app.get("/api/my-events")
+    def my_events(request: Request):
+        with store.transaction() as connection:
+            user = current(connection, request)
+            rows = connection.execute(
+                "SELECT events.id,registrations.status AS mine FROM events LEFT JOIN registrations "
+                "ON events.id=registrations.event AND registrations.user_id=? "
+                "WHERE host=? OR registrations.user_id=? ORDER BY starts_at>=? DESC,starts_at LIMIT 100",
+                (user["id"], user["id"], user["id"], int(store.clock()))).fetchall()
+            result = []
+            for row in rows:
+                event = reconcile(connection, row["id"], int(store.clock()))
+                mine = connection.execute("SELECT status FROM registrations WHERE event=? AND user_id=?", (row["id"], user["id"])).fetchone()
+                result.append({**summary(connection, event), "my_status": mine["status"] if mine else None,
+                               "is_host": event["host"] == user["id"]})
+            return result
 
     @app.post("/api/events", status_code=201)
     def create_event(payload: EventInput, request: Request):
@@ -92,7 +125,12 @@ def create_app(path=None, clock=None):
             registration = connection.execute("SELECT * FROM registrations WHERE event=? AND user_id=?", (event_id, user["id"])).fetchone()
             is_host = event["host"] == user["id"]
             result.update(is_host=is_host, mine=dict(registration) if registration else None)
+            if registration and registration["status"] == "waiting":
+                result["mine"]["queue_position"] = connection.execute(
+                    "SELECT count(*) FROM registrations WHERE event=? AND status='waiting' AND id<=?", (event_id, registration["id"])).fetchone()[0]
             if is_host or registration:
+                result["announcements"] = [dict(row) for row in connection.execute(
+                    "SELECT text,created FROM announcements WHERE event=? ORDER BY created DESC,id DESC LIMIT 30", (event_id,))]
                 result["roster"] = [{"nickname": row["nickname"], "status": row["status"],
                                      **({"user_id": row["user_id"]} if is_host else {})} for row in connection.execute(
                     "SELECT users.nickname,registrations.status,user_id FROM registrations JOIN users ON users.id=user_id WHERE event=? ORDER BY registrations.id", (event_id,))]
@@ -101,6 +139,30 @@ def create_app(path=None, clock=None):
             if event["settlement"] and (is_host or registration):
                 result["settlement"] = json.loads(event["settlement"])
             return result
+
+    @app.post("/api/events/{event_id}/announcements", status_code=201)
+    def announce(event_id: str, payload: AnnouncementInput, request: Request):
+        with store.transaction() as connection:
+            user = current(connection, request)
+            host_only(connection, event_id, user)
+            event = reconcile(connection, event_id, int(store.clock()))
+            existing = connection.execute("SELECT id,text FROM announcements WHERE event=? AND request_id=?", (event_id, payload.request_id)).fetchone()
+            if existing:
+                if existing["text"] != payload.text:
+                    return JSONResponse({"detail": "同一請求代碼不可重用於不同公告"}, status_code=409)
+                return {"id": existing["id"], "replayed": True}
+            if event["lifecycle"] in {"canceled", "settled"}:
+                return JSONResponse({"detail": "已取消或結算的活動不能再發布公告"}, status_code=409)
+            if connection.execute("SELECT count(*) FROM announcements WHERE event=?", (event_id,)).fetchone()[0] >= 30:
+                return JSONResponse({"detail": "每場活動最多 30 則公告"}, status_code=409)
+            announcement_id = identifier()
+            now = int(store.clock())
+            connection.execute("INSERT INTO announcements VALUES (?,?,?,?,?,?)", (announcement_id, event_id, user["id"], payload.text, payload.request_id, now))
+            people = connection.execute("SELECT user_id FROM registrations WHERE event=? AND user_id<>? AND status IN ('confirmed','waiting','offered','checked_in')", (event_id, user["id"])).fetchall()
+            for person in people:
+                notify(connection, event_id, person["user_id"], "主辦公告：" + payload.text, now)
+            audit(connection, event_id, "announcement_published", now)
+            return {"id": announcement_id, "notified": len(people), "replayed": False}
 
     @app.post("/api/events/{event_id}/join")
     def join(event_id: str, request: Request):

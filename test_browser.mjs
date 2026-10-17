@@ -59,3 +59,12 @@ test("Network remains authoritative while online",async()=>{
   assert.equal((await response).online,true);assert.equal(requests.length,0);
 });
 
+test("Announcements and personal activity responses are not intercepted",()=>{
+  const {handlers}=worker(false);
+  for(const [path,method] of [["/api/my-events","GET"],["/api/events/demo/announcements","POST"],["/api/notifications","GET"]]){
+    let intercepted=false;
+    handlers.fetch({request:{url:"https://portfolio.example"+path,method},respondWith:()=>{intercepted=true;}});
+    assert.equal(intercepted,false);
+  }
+});
+

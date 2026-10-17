@@ -63,122 +63,252 @@ document.querySelector("#auth-form").addEventListener("submit", async event => {
   finally { button.disabled = false; }
 });
 document.querySelector("#logout").addEventListener("click", async () => {
-  try { await api("/logout","POST"); location.hash=""; await load(); } catch (error) { toast(error.message); }
+  try { await api("/logout","POST"); location.hash=""; clearPrivateState(); await load(); } catch (error) { toast(error.message); }
 });
+
 
 let user=null;
 let events=[];
 let selected=null;
 let notifications=[];
-const stateLabels={recruiting:"招募中",ready:"已達成團門檻",at_risk:"人數不足，需補位",locked:"已截止成團",canceled:"已取消",settled:"已結算"};
-const registrationLabels={confirmed:"已確認",waiting:"排隊候補",offered:"限時保留，待接受",expired:"邀請已逾時",canceled:"已退出／取消",checked_in:"已簽到"};
-function when(seconds) { return new Date(seconds*1000).toLocaleString("zh-TW",{month:"numeric",day:"numeric",hour:"2-digit",minute:"2-digit",hour12:false}); }
-function localTime(hours) {
-  const date=new Date(Date.now()+hours*3600000);
-  return new Date(date.getTime()-date.getTimezoneOffset()*60000).toISOString().slice(0,16);
+let screen=new URLSearchParams(location.hash.slice(1)).get("screen")||"discover";
+let sport="",searchText="",selectedDay="";
+let onlyJoinable=false,includePast=false,detailOpened=new URLSearchParams(location.hash.slice(1)).has("event");
+let formDraft=null;
+let announcementDrafts={};
+let confirmation=null;
+let serverOffset=0;
+let loading=false;
+let loadSequence=0;
+const stateLabels={recruiting:"招募中",ready:"已達成團門檻",at_risk:"缺人・待補位",locked:"已截止成團",canceled:"已取消",settled:"已結算"};
+const registrationLabels={confirmed:"已確認",waiting:"排隊候補",offered:"名額已保留，待接受",expired:"候補邀請已逾時",canceled:"已退出／取消",checked_in:"已簽到"};
+const auditLabels={created:"建立活動",demo_created:"建立虛構示範",joined_confirmed:"確認報名",joined_waiting:"加入候補",left:"成員退出",offer_created:"發出限時保留",offer_expired:"保留邀請逾時",offer_accepted:"候補本人接受",quorum_locked:"截止確認成團",event_canceled:"活動取消",checked_in:"主辦記錄出席",settled:"建立結算紀錄",announcement_published:"發布主辦公告"};
+function localDate(seconds){const date=new Date(seconds*1000);return date.getFullYear()+"-"+String(date.getMonth()+1).padStart(2,"0")+"-"+String(date.getDate()).padStart(2,"0");}
+function timeLabel(seconds){return new Date(seconds*1000).toLocaleTimeString("zh-TW",{hour:"2-digit",minute:"2-digit",hour12:false});}
+function dateLabel(seconds){return new Date(seconds*1000).toLocaleDateString("zh-TW",{month:"numeric",day:"numeric",weekday:"short"});}
+function when(seconds){return dateLabel(seconds)+" "+timeLabel(seconds);}
+function localTime(hours){const date=new Date(Date.now()+hours*3600000);return new Date(date.getTime()-date.getTimezoneOffset()*60000).toISOString().slice(0,16);}
+function makeRequestId(){return Array.from(crypto.getRandomValues(new Uint8Array(16)),value=>value.toString(16).padStart(2,"0")).join("");}
+function stateBadge(item){return '<span class="state '+item.state+'">'+stateLabels[item.state]+'</span>';}
+function court(sportName,classes=""){
+  const basketball=sportName==="籃球";
+  return `<svg class="${classes}" viewBox="0 0 120 90" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="8" y="7" width="104" height="76"/><path d="M60 7V83"/>${basketball?'<circle cx="60" cy="45" r="12"/><path d="M8 24H26V66H8M112 24H94V66H112M8 12a36 36 0 010 66M112 12a36 36 0 000 66"/>':'<path d="M8 22H112M8 68H112M36 7V83M84 7V83"/><path d="M60 7V83" stroke-dasharray="4 4"/>'}</svg>`;
 }
-function createForm() {
-  return `<details ${events.length?"":"open"}><summary>主辦一場新活動</summary><form id="create-event" class="form-grid">
-  <label class="full">活動名稱<input name="title" placeholder="週五下課羽球臨打" maxlength="70" required></label>
-  <label>運動<select name="sport"><option>羽球</option><option>籃球</option><option>排球</option><option>桌球</option><option>其他</option></select></label>
-  <label>地點<input name="venue" placeholder="體育館 A 場" maxlength="120" required></label>
-  <label>開始時間<input type="datetime-local" name="starts_at" required value="${localTime(26)}"></label>
-  <label>結束時間<input type="datetime-local" name="ends_at" required value="${localTime(28)}"></label>
-  <label>成團確認截止<input type="datetime-local" name="cutoff_at" required value="${localTime(24)}"></label>
-  <label>候補回覆期限（分鐘）<input type="number" name="offer_minutes" min="1" max="120" value="15" required></label>
-  <label>最多人數<input type="number" name="capacity" min="2" max="32" value="6" required></label>
-  <label>成團最低人數<input type="number" name="minimum" min="2" max="32" value="4" required></label>
-  <label class="full">場地總費用（NT$，不是每人價格）<input type="number" name="total_cost" min="0" max="100000" value="600" required></label>
-  <label class="full">備案與取消方式<textarea name="backup_plan" maxlength="300" placeholder="下雨改室內；場館關閉時由主辦人取消並通知" required></textarea></label>
-  <div class="full"><button>建立可分享的活動</button><p class="muted">主辦人不會自動佔名額，要參加也請報名。地點與活動資訊會公開，請勿填私人住址。</p></div></form></details>`;
+function poster(item){
+  const category={"籃球":"basketball","羽球":"badminton","排球":"volleyball","桌球":"tabletennis"}[item.sport]||"";
+  const label={"籃球":"BASKETBALL","羽球":"BADMINTON","排球":"VOLLEYBALL","桌球":"TABLE TENNIS"}[item.sport]||"PICKUP";
+  return '<span class="sport-poster '+category+'">'+court(item.sport)+'<span>'+label+'</span></span>';
 }
-function eventCard(item) {
-  return `<button class="event-button ${selected?.id===item.id?"active":""}" data-action="select" data-id="${escapeHtml(item.id)}">
-    <div class="row between"><span class="badge">${escapeHtml(item.sport)}</span><span class="badge ${item.state==="at_risk"?"warn":item.state==="canceled"?"gray":""}">${stateLabels[item.state]}</span></div>
-    <h3>${escapeHtml(item.title)}</h3><p>${when(item.starts_at)} · ${escapeHtml(item.venue)}</p>
-    <progress max="${item.capacity}" value="${item.confirmed}" aria-label="已確認人數"></progress>
-    <p>${item.confirmed} / ${item.capacity} 人確認 · ${item.minimum} 人成團 · ${item.waiting} 人候補</p>
-  </button>`;
+function eventRow(item){
+  return `<button class="event-row ${selected?.id===item.id?"active":""}" data-action="select" data-id="${escapeHtml(item.id)}">${poster(item)}<div><div class="event-meta">${stateBadge(item)}${screen==="mine"?'<span class="caption">'+(item.is_host?"我主辦":registrationLabels[item.my_status]||"未報名")+"</span>":""}</div><h3>${escapeHtml(item.title)}</h3><p>${timeLabel(item.starts_at)} — ${timeLabel(item.ends_at)} · ${escapeHtml(item.sport)}</p><p>${escapeHtml(item.venue)}</p></div><div class="roster-amount">${item.confirmed}<span class="caption"> / ${item.capacity}</span><small>${item.minimum} 人成團 · ${item.waiting} 人候補</small><span class="fee">${item.estimated_cost===null?"費用待人數確認":"暫估 $"+item.estimated_cost+" / 人"}</span></div></button>`;
 }
-function eventView() {
-  if (!selected) return '<section class="panel empty">還沒有活動。建立一場臨打，把邀請連結傳給朋友；<br>從報名到出席結算，都在同一個地方。</section>';
-  const item=selected;
-  const mine=item.mine;
+function weekStrip(){
+  const now=new Date();
+  const days=Array.from({length:7},(unused,index)=>{const day=new Date(now);day.setDate(day.getDate()+index);return day;});
+  return '<div class="week-strip" aria-label="依活動日期篩選"><button class="day '+(!selectedDay?"active":"")+'" data-action="day" data-date=""><span>查看</span><b>全部</b></button>'+days.map((day,index)=>{const value=localDate(day.getTime()/1000);return `<button class="day ${selectedDay===value?"active":""}" data-action="day" data-date="${value}" aria-pressed="${selectedDay===value}"><span>${index===0?"今天":day.toLocaleDateString("zh-TW",{weekday:"short"})}</span><b>${day.getDate()}</b></button>`;}).join("")+'</div>';
+}
+function discoveryTools(){
+  return `<section class="discovery-tools">${weekStrip()}<div class="filters"><div class="sports" aria-label="運動篩選">${["","羽球","籃球","排球","桌球","其他"].map(value=>`<button class="sport-chip ${sport===value?"active":""}" data-action="sport" data-sport="${value}" aria-pressed="${sport===value}">${value||"全部運動"}</button>`).join("")}</div><form id="search-events" class="search"><label class="hidden" for="event-search">搜尋名稱或場地</label><input id="event-search" name="query" maxlength="100" placeholder="搜尋名稱或場地" value="${escapeHtml(searchText)}"><button class="outline">搜尋</button></form></div><div class="filter-checks"><label class="check"><input id="filter-joinable" type="checkbox" ${onlyJoinable?"checked":""}>只看仍可報名的球局</label>${screen==="discover"?`<label class="check"><input id="filter-past" type="checkbox" ${includePast?"checked":""}>包含過去活動</label>`:""}<span class="caption">時間依你的裝置時區顯示 · ${Intl.DateTimeFormat().resolvedOptions().timeZone}</span></div></section>`;
+}
+function eventFeed(){
+  const visible=selectedDay?events.filter(item=>localDate(item.starts_at)===selectedDay):events;
+  let currentDate="";
+  return `<div class="feed-label"><span>${screen==="mine"?"我主辦或曾報名的活動":"選一場適合自己的臨打"}</span><span>${visible.length} 場${loading?" · 更新中":""}</span></div>${visible.map(item=>{
+    const day=localDate(item.starts_at);
+    let title="";
+    if(day!==currentDate){currentDate=day;title='<h2 class="date-heading">'+dateLabel(item.starts_at)+'</h2>';}
+    return title+eventRow(item);
+  }).join("")||'<div class="empty"><h3>這裡先留一個空檔。</h3><p>目前條件下沒有球局。試著切換日期、運動或搜尋條件；也可以自己開一場。</p><button class="outline" data-action="clear-filters">清除篩選</button></div>'}`;
+}
+function eventDetail(){
+  if(!selected)return '<section class="detail"><div class="detail-empty"><strong>R↗</strong><h3>選一場球局。</h3><p class="muted">成團門檻、候補與費用，<br>在決定參加前先看清楚。</p></div></section>';
+  const item=selected,mine=item.mine;
+  const now=Date.now()+serverOffset;
   const open=["recruiting","ready","at_risk"].includes(item.state);
   const canJoin=open&&(!mine||["expired","canceled"].includes(mine.status));
-  const canLeave=mine&&["confirmed","waiting","offered"].includes(mine.status)&&Date.now()<item.starts_at*1000&&!["canceled","settled"].includes(item.state);
-  return `<section class="panel">
-    <div class="row between"><span class="eyebrow">THE NEXT GAME</span><span class="badge ${item.state==="at_risk"?"warn":""}">${stateLabels[item.state]}</span></div>
-    <h2>${escapeHtml(item.title)}</h2><p class="muted">${escapeHtml(item.sport)} · ${when(item.starts_at)} — ${when(item.ends_at)}<br>${escapeHtml(item.venue)} · 主辦 ${escapeHtml(item.host_name)}</p>
-    <div class="metrics"><div class="metric"><small>確認 / 上限</small><b>${item.confirmed} / ${item.capacity}</b></div><div class="metric"><small>成團門檻</small><b>${item.minimum} 人</b></div><div class="metric"><small>暫估每人上限</small><b>${item.estimated_cost===null?"—":"$"+item.estimated_cost}</b></div></div>
-    <p class="notice ${item.state==="at_risk"?"warning":""}">截止 ${when(item.cutoff_at)} · 只有「已確認」的人數算成團；候補邀請保留名額但不算出席承諾。截止仍不足則取消，截止後退出導致不足也會取消。</p>
-    ${mine?`<p><span class="badge">我的狀態：${registrationLabels[mine.status]}</span>${mine.status==="offered"?`<strong>請於 ${when(mine.deadline)} 前接受</strong>`:""}</p>`:""}
-    <div class="actions">${canJoin?'<button data-action="join">報名 / 額滿時加入候補</button>':""}${mine?.status==="offered"?'<button data-action="accept">接受保留名額</button>':""}${canLeave?'<button data-action="leave" class="secondary">退出或放棄候補</button>':""}<button data-action="share" class="secondary">複製邀請</button><a href="/api/events/${escapeHtml(item.id)}/calendar.ics">下載行事曆</a></div>
-    <div class="divider"></div><h3>費用與備案，先說清楚</h3><p>場地總費用 NT$ ${item.total_cost}。結束後依主辦人記錄的簽到人數平分；餘數按報名先後分配，每人最多差 NT$ 1。這不是付款服務。</p><p class="muted">${escapeHtml(item.backup_plan)}</p>
-    ${item.roster?`<div class="divider"></div><h3>參與者名單</h3><p class="muted">僅主辦人及曾報名的帳號可查看暱稱；不公開電話、學號或帳號名稱。</p><div class="table-wrap"><table><thead><tr><th>暱稱</th><th>狀態</th>${item.is_host?"<th>出席紀錄</th>":""}</tr></thead><tbody>${item.roster.map(person=>`<tr><td>${escapeHtml(person.nickname)}</td><td>${registrationLabels[person.status]}</td>${item.is_host?`<td>${person.status==="confirmed"&&Date.now()>= (item.starts_at-1800)*1000&&item.state==="locked"?`<button data-action="check-in" data-id="${escapeHtml(person.user_id)}" class="secondary">記錄簽到</button>`:"—"}</td>`:""}</tr>`).join("")}</tbody></table></div>`:""}
-    ${item.is_host?`<div class="actions">${open||item.state==="locked"&&Date.now()<item.starts_at*1000?'<button data-action="cancel" class="danger">取消這場活動</button>':""}${item.state==="locked"&&Date.now()>=item.ends_at*1000?'<button data-action="settle">依已簽到人數結算</button>':""}</div><p class="muted">簽到：開始前 30 分鐘至結束後 24 小時，由主辦人確認。結算後不可修改。</p>`:""}
-    ${item.settlement?`<div class="divider"></div><h3>不可變更的結算紀錄</h3><p class="notice">僅計算應分攤金額，未進行收款。合計 NT$ ${item.settlement.total}。</p>${item.settlement.people.map(person=>`<div class="choice"><strong>${escapeHtml(person.nickname)}</strong><b>NT$ ${person.amount}</b></div>`).join("")}`:""}
-    ${item.audit?`<details><summary>活動流程紀錄（最近 50 筆）</summary><ul>${item.audit.map(entry=>`<li>${when(entry.created)} · ${escapeHtml(entry.action)}</li>`).join("")}</ul></details>`:""}
-  </section>`;
+  const canLeave=mine&&["confirmed","waiting","offered"].includes(mine.status)&&now<item.starts_at*1000&&!["canceled","settled"].includes(item.state);
+  const draft=announcementDrafts[item.id]?.text||"";
+  return `<section class="detail" id="event-detail" tabindex="-1"><div class="detail-top"><button class="back-button" data-action="back">← 返回球局清單</button><div class="detail-kicker"><span>MATCH DETAILS</span>${stateBadge(item)}</div>${court(item.sport,"detail-court")}<h2>${escapeHtml(item.title)}</h2><p>${when(item.starts_at)} — ${timeLabel(item.ends_at)}<br>${escapeHtml(item.venue)}</p></div><div class="detail-body"><div class="scoreboard"><div><small>確認 / 名額上限</small><b>${item.confirmed}<span class="caption"> / ${item.capacity}</span></b></div><div><small>成團門檻</small><b>${item.minimum}<span class="caption"> 人</span></b></div><div><small>暫估每人上限</small><b>${item.estimated_cost===null?"—":"$"+item.estimated_cost}</b></div></div><progress class="capacity-bar" max="${item.capacity}" value="${item.confirmed}" aria-label="確認人數"></progress>
+  <div class="status-note ${item.state==="at_risk"?"warning":""}"><strong>${item.state==="at_risk"?"還差 "+Math.max(0,item.minimum-item.confirmed)+" 人確認，這一場才算成團。":item.state==="ready"?"已達門檻，仍要留意截止前是否有人退出。":item.state==="canceled"?"這場已取消，請勿前往。":item.state==="locked"?"截止時已達門檻，開場前若退出導致不足仍會取消。":item.state==="settled"?"出席與分攤紀錄已保存。":"還差 "+Math.max(0,item.minimum-item.confirmed)+" 人確認。"}</strong>確認截止 ${when(item.cutoff_at)}。候補保留名額不算成團人數；截止仍不足則取消。</div>
+  ${mine?`<div class="my-status"><span class="caption">我的報名</span><strong>${registrationLabels[mine.status]}</strong>${mine.status==="waiting"?'目前等待順位 '+mine.queue_position+'（不含已保留名額）':""}${mine.status==="offered"?`<span class="countdown" data-deadline="${mine.deadline}"></span><span class="caption">請在 ${when(mine.deadline)} 前本人接受。倒數僅供提示，以伺服器狀態為準。</span>`:""}</div>`:""}
+  <div class="detail-actions">${canJoin?'<button data-action="join">報名這場・額滿時排候補</button>':""}${mine?.status==="offered"?'<button data-action="accept">接受這個保留名額</button>':""}${canLeave?'<button class="outline" data-action="leave">退出／放棄候補</button>':""}<button class="quiet" data-action="refresh">更新這場狀態 ↻</button></div><div class="detail-links"><button class="quiet" data-action="share">複製活動連結 ↗</button><a href="/api/events/${escapeHtml(item.id)}/calendar.ics">加入行事曆</a></div>
+  <div class="detail-section"><h3 class="section-heading">先把規則說清楚</h3><div class="fact-line"><span>場地總費</span><p>NT$ ${item.total_cost}。結束後依已簽到者分攤，餘數依報名順序每人最多差 $1；不代收款。</p></div><div class="fact-line"><span>候補期限</span><p>${item.offer_minutes} 分鐘內本人接受，最晚不超過截止。逾期釋給下一位，重排從隊尾開始。</p></div><div class="fact-line"><span>備案</span><p>${escapeHtml(item.backup_plan)}</p></div><div class="fact-line"><span>主辦</span><p>${escapeHtml(item.host_name)}</p></div></div>
+  ${item.announcements?`<div class="detail-section"><h3 class="section-heading">主辦公告</h3>${item.announcements.length?'<ul class="announcements">'+item.announcements.map(note=>'<li class="announcement">'+escapeHtml(note.text)+'<small>'+when(note.created)+'</small></li>').join("")+"</ul>":'<p class="muted">目前沒有新公告。</p>'}${item.is_host&&!["canceled","settled"].includes(item.state)?`<form id="announcement-form" class="form-stack"><label>有場地或集合方式要提醒？<textarea name="text" minlength="3" maxlength="500" required placeholder="例如：改在場館北門集合，請提前 10 分鐘到。">${escapeHtml(draft)}</textarea></label><button class="outline">發布公告並寫入站內通知</button><span class="caption">僅主辦人與曾報名帳號能查看；沒有 Email 或背景推播。</span></form>`:""}</div>`:""}
+  ${item.roster?`<div class="detail-section"><h3 class="section-heading">這場的球友</h3><p class="caption">只對主辦與曾報名者顯示暱稱，不公開電話、學號或帳號。</p>${item.roster.map(person=>`<div class="member-row"><span class="avatar" aria-hidden="true">${escapeHtml(Array.from(person.nickname)[0]||"友")}</span><span>${escapeHtml(person.nickname)}</span><span class="member-state">${registrationLabels[person.status]}</span>${item.is_host&&person.status==="confirmed"&&item.state==="locked"&&now>=(item.starts_at-1800)*1000&&now<=(item.ends_at+86400)*1000?`<button class="outline" data-action="check-in" data-id="${escapeHtml(person.user_id)}">記錄簽到</button>`:""}</div>`).join("")}</div>`:""}
+  ${item.settlement?`<div class="detail-section"><h3 class="section-heading">出席後的分攤</h3><p class="notice">已結算 NT$ ${item.settlement.total}，未進行收款；這份紀錄不再更改。</p>${item.settlement.people.map(person=>`<div class="settlement-row"><span>${escapeHtml(person.nickname)}</span><b>$ ${person.amount}</b></div>`).join("")}<div class="button-row"><button class="quiet" data-action="export">下載分攤紀錄 JSON ↗</button></div></div>`:""}
+  ${item.is_host?`<div class="detail-section"><h3 class="section-heading">主辦工具</h3><p class="caption">簽到限已截止成團，在開始前 30 分鐘至結束後 24 小時記錄。結束後至少一名簽到才可結算。</p><div class="button-row">${item.state==="locked"&&now>=item.ends_at*1000?'<button data-action="settle">依已簽到者結算</button>':""}${(open||item.state==="locked")&&now<item.starts_at*1000?'<button class="danger" data-action="cancel">取消這場活動</button>':""}</div><details><summary>活動流程紀錄</summary><ul class="audit-list">${item.audit.map(entry=>'<li>'+when(entry.created)+" · "+(auditLabels[entry.action]||escapeHtml(entry.action))+"</li>").join("")}</ul></details></div>`:""}
+  </div></section>`;
 }
-function render() {
+function createView(){
+  const values=formDraft||{title:"",sport:"羽球",venue:"",starts_at:localTime(26),ends_at:localTime(28),cutoff_at:localTime(24),offer_minutes:15,capacity:6,minimum:4,total_cost:600,backup_plan:""};
+  return `<div class="board-heading"><div><p class="eyebrow">HOST A GAME</p><h1>空一個場，約一群人。</h1><p class="muted">先把人數、截止與費用說清楚，開場前少一點來回確認。</p></div></div><div class="create-layout"><section class="create-panel"><form id="create-event">
+  <div class="form-block"><div class="step-label"><span class="step-number">01</span> 先說這一場</div><div class="form-grid"><label class="full">活動名稱<input name="title" maxlength="70" value="${escapeHtml(values.title)}" placeholder="下課後，羽球雙打" required></label><label>運動<select name="sport">${["羽球","籃球","排球","桌球","其他"].map(value=>'<option '+(values.sport===value?"selected":"")+">"+value+"</option>").join("")}</select></label><label>公開場地<input name="venue" maxlength="120" value="${escapeHtml(values.venue)}" placeholder="場館名稱與場號，勿填私人住址" required></label></div></div>
+  <div class="form-block"><div class="step-label"><span class="step-number">02</span> 時間與成團門檻</div><div class="form-grid"><label>開始時間<input type="datetime-local" name="starts_at" value="${escapeHtml(values.starts_at)}" required></label><label>結束時間<input type="datetime-local" name="ends_at" value="${escapeHtml(values.ends_at)}" required></label><label>確認成團截止<input type="datetime-local" name="cutoff_at" value="${escapeHtml(values.cutoff_at)}" required></label><label>候補回覆期限（分鐘）<input type="number" name="offer_minutes" min="1" max="120" value="${values.offer_minutes}" required></label><label>最多收幾人？<input type="number" name="capacity" min="2" max="32" value="${values.capacity}" required></label><label>最少幾人才能打？<input type="number" name="minimum" min="2" max="32" value="${values.minimum}" required></label></div></div>
+  <div class="form-block"><div class="step-label"><span class="step-number">03</span> 費用與備案</div><div class="form-stack"><label>場地總費用（NT$，不是每人價格）<input name="total_cost" type="number" min="0" max="100000" value="${values.total_cost}" required></label><label>下雨、場館關閉或缺人時怎麼辦？<textarea name="backup_plan" maxlength="300" placeholder="請明確寫下改場地或取消方式。" required>${escapeHtml(values.backup_plan)}</textarea></label><p class="caption">活動名稱、場地與備案會公開。主辦人不會自動佔名額，要參加也請自行報名。</p><button>發布這場球局</button></div></div></form></section><aside class="rules-sidebar"><h3>這幾條，球友都看得到。</h3><ol><li>只有已確認的人數算成團。</li><li>額滿後依序候補，不設付費插隊。</li><li>名額釋出後，本人限時接受才加入。</li><li>截止不足取消；開場前退出造成不足，也會取消。</li><li>結束後依主辦記錄的出席分攤，不自動罰款或收費。</li></ol><p class="notice">建立表單草稿只保留在這次頁面記憶體。切換頁籤可保留，關閉或重整不保留。</p><p>這不是場館預約工具，請先自行確認場地。站內通知不是緊急聯絡方式。</p></aside></div>`;
+}
+function updateCounters(){
+  document.querySelectorAll("[data-deadline]").forEach(element=>{
+    const seconds=Math.max(0,Math.ceil((Number(element.dataset.deadline)*1000-Date.now()-serverOffset)/1000));
+    element.textContent=seconds?String(Math.floor(seconds/60)).padStart(2,"0")+":"+String(seconds%60).padStart(2,"0"):"期限已到，請更新狀態";
+  });
+}
+function render(){
   renderIdentity(user);
-  main.innerHTML=`<section class="hero"><div><p class="eyebrow">LESS GROUP CHAT. MORE GAME TIME.</p><h1>有人說要來，<br>不代表這一場成得了。</h1><p>讓成團門檻、候補回覆與最後費用都有明確規則。每一次補位都需要本人確認，不再對著聊天紀錄猜人數。</p></div><div class="hero-note"><strong>報名 ≠ 成團</strong>門檻與截止清楚<br>候補按序、限時接受<br>依實際出席平分</div></section>
-    <div class="layout"><aside><section class="panel"><div class="row between"><h3>場邊通知</h3><button data-action="refresh" class="link">重新整理</button></div>
-    ${user?notifications.length?notifications.map(note=>`<div class="choice"><div>${escapeHtml(note.message)}<br><small>${when(note.created)}</small><button class="link" data-action="notification" data-id="${note.id}" data-event="${escapeHtml(note.event)}">${note.seen?"查看活動":"標為已讀並查看"}</button></div></div>`).join(""):'<p class="muted">目前沒有通知。候補名額出現時，請回到這裡確認。</p>':'<p class="muted">登入即可報名及查看個人通知。</p><button data-action="auth">開始參與</button>'}
-    <p class="notice">通知僅儲存在站內，須開啟頁面重新整理。未提供背景推播或 Email。</p></section>
-    <section class="panel"><h3>公平候補規則</h3><ol class="muted"><li>額滿後依報名順序排隊。</li><li>有人退出才保留空位。</li><li>本人限時接受才正式加入。</li><li>逾時則交給下一位；重排從隊尾開始。</li></ol></section></aside><div>
-    <section class="panel"><div class="row between"><h2>邀朋友，打一場。</h2><span class="badge gray">${events.length} 場紀錄</span></div><div class="cards">${events.map(eventCard).join("")||'<p class="muted">目前尚無活動；示範資料需要自行建立或匯入。</p>'}</div></section>
-    ${eventView()}<section class="panel">${createForm()}</section></div></div>`;
+  document.querySelectorAll("[data-screen]").forEach(button=>button.setAttribute("aria-current",button.dataset.screen===screen?"page":"false"));
+  const unseen=notifications.filter(note=>!note.seen).length;
+  document.querySelector("#notification-count").textContent=unseen>9?"9+":String(unseen);
+  document.querySelector("#notification-count").classList.toggle("hidden",!unseen||!user);
+  main.classList.toggle("detail-mode",detailOpened);
+  if(screen==="create"){main.innerHTML=createView();return;}
+  if(screen==="mine"&&!user){main.innerHTML='<div class="empty"><h2>把你的球局，放在一起。</h2><p>登入後就能查看自己主辦、已報名與候補中的活動。</p><button data-action="auth">登入查看我的球局</button></div>';return;}
+  main.innerHTML=`<div class="board-heading"><div><p class="eyebrow">${screen==="mine"?"YOUR MATCHES":"THE WEEK AHEAD"}</p><h1>${screen==="mine"?"我的球局，不再散在聊天裡。":"這週，約一場。"}</h1><p class="muted">${screen==="mine"?"主辦、參加、候補，這裡看清楚。":"先看成團狀態，再決定要不要出門。"}</p></div><div class="board-caption">候補名額需要本人再次確認。<br>未確認的保留，不會湊成團人數。</div></div>${discoveryTools()}<div class="board"><section class="feed" aria-label="球局清單">${eventFeed()}</section>${eventDetail()}</div>`;
+  updateCounters();
 }
-async function load(eventId) {
-  user=await api("/me").catch(()=>null);
-  events=await api("/events");
-  const hashId=new URLSearchParams(location.hash.slice(1)).get("event");
-  const chosen=eventId||selected?.id||hashId||events[0]?.id;
-  selected=chosen?await api("/events/"+chosen):null;
-  notifications=user?await api("/notifications"):[];
-  render();
+async function load(eventId, selectFirst=false){
+  const requestSequence=++loadSequence;
+  const priorId=eventId||new URLSearchParams(location.hash.slice(1)).get("event")||selected?.id;
+  loading=true;
+  const resolved=await api("/me").catch(()=>null);
+  if(requestSequence!==loadSequence)return;
+  user=resolved;
+  if(!user){notifications=[];selected=null;clearSensitiveDialogs();if(screen==="mine")events=[];render();}
+  const parameters=new URLSearchParams({sport,q:searchText,include_past:String(includePast),only_joinable:String(onlyJoinable)});
+  let listed=screen==="mine"?(user?await api("/my-events"):[]):await api("/events?"+parameters);
+  if(screen==="mine"){
+    listed=listed.filter(item=>(!sport||item.sport===sport)&&(!searchText||(item.title+" "+item.venue).toLowerCase().includes(searchText.toLowerCase()))&&(!onlyJoinable||["recruiting","ready","at_risk"].includes(item.state)));
+  }
+  if(requestSequence!==loadSequence)return;
+  events=listed;
+  const visible=selectedDay?events.filter(item=>localDate(item.starts_at)===selectedDay):events;
+  const chosen=selectFirst?visible[0]?.id:priorId||visible[0]?.id;
+  const nextSelected=chosen?await api("/events/"+chosen):null;
+  if(requestSequence!==loadSequence)return;
+  selected=nextSelected;
+  if(selected)serverOffset=selected.server_time*1000-Date.now();
+  const nextNotifications=user?await api("/notifications"):[];
+  if(requestSequence!==loadSequence)return;
+  notifications=nextNotifications;
+  loading=false;
+  document.querySelector("#live-update").classList.add("hidden");render();
 }
+async function setScreen(next){
+  screen=next;detailOpened=false;
+  location.hash="screen="+screen;
+  await load(undefined,true);
+}
+function clearSensitiveDialogs(){
+  document.querySelectorAll("dialog[open]").forEach(target=>target.close());
+  document.querySelector("#notifications-dialog").innerHTML="";
+  confirmation=null;
+}
+function clearPrivateState(){loadSequence++;user=null;selected=null;notifications=[];events=[];formDraft=null;announcementDrafts={};screen="discover";detailOpened=false;clearSensitiveDialogs();render();}
+function requestConfirmation(text,callback){
+  confirmation=callback;document.querySelector("#confirm-description").textContent=text;document.querySelector("#confirm-dialog").showModal();
+}
+document.querySelector("#confirm-yes").addEventListener("click",async()=>{
+  const callback=confirmation;confirmation=null;document.querySelector("#confirm-dialog").close();
+  try{if(callback)await callback();}catch(error){toast(error.message);}
+});
+function notificationsView(){
+  const target=document.querySelector("#notifications-dialog");
+  target.innerHTML=`<button class="dialog-close" data-close="notifications-dialog" aria-label="關閉通知">×</button><p class="eyebrow">ON THE SIDELINES</p><h2 id="notes-title">站內通知</h2><p class="caption">須開啟頁面查看；沒有背景推播或 Email。</p><ul class="notes-list">${notifications.map(note=>`<li class="note-item ${note.seen?"":"unread"}"><p>${escapeHtml(note.message)}</p><small>${when(note.created)}</small><br><button class="outline small" data-action="notification" data-id="${note.id}" data-event="${escapeHtml(note.event)}">${note.seen?"查看活動":"標為已讀並查看活動"}</button></li>`).join("")||'<li class="empty">目前沒有通知。</li>'}</ul>`;
+  target.showModal();
+}
+async function mutate(action,identifier){
+  const eventId=selected.id;
+  const endpoint=action==="check-in"?"check-in/"+identifier:action;
+  try{
+    await api("/events/"+eventId+"/"+endpoint,"POST");await load(eventId);
+    toast({join:"報名已處理，請確認自己的實際狀態。",accept:"已接受名額，現在算正式確認參加。",leave:"已退出，釋出空位會依規則補位。",cancel:"這場已取消，站內通知已寫入；請另行聯絡球友。",settle:"分攤紀錄已保存，未進行收款。","check-in":"已記錄這位球友出席。"}[action]||"已更新");
+  }catch(error){
+    if(["join","accept","leave"].includes(action))await load(eventId).catch(()=>{});
+    throw error;
+  }
+}
+async function handleAction(button){
+  const action=button.dataset.action;
+  if(action==="auth"){dialog.showModal();return;}
+  if(action==="back"){detailOpened=false;render();return;}
+  if(action==="select"){
+    detailOpened=true;location.hash="screen="+screen+"&event="+button.dataset.id;await load(button.dataset.id);
+    document.querySelector("#event-detail")?.focus({preventScroll:true});
+    if(matchMedia("(max-width:820px)").matches)window.scrollTo({top:0,behavior:"instant"});return;
+  }
+  if(action==="day"){selectedDay=button.dataset.date;detailOpened=false;location.hash="screen="+screen;await load(undefined,true);return;}
+  if(action==="sport"){sport=button.dataset.sport;detailOpened=false;location.hash="screen="+screen;await load(undefined,true);return;}
+  if(action==="clear-filters"){sport="";searchText="";selectedDay="";onlyJoinable=false;includePast=false;location.hash="screen="+screen;await load(undefined,true);return;}
+  if(action==="refresh"){await load(selected?.id);toast("已取得伺服器最新狀態。");return;}
+  if(action==="share"){
+    const link=location.origin+"/#screen=discover&event="+selected.id;
+    try{await navigator.clipboard.writeText(link);toast("活動連結已複製。");}catch{toast("可複製網址列中的活動連結。");}
+    return;
+  }
+  if(!user){dialog.showModal();return;}
+  if(action==="notifications"){notifications=await api("/notifications");notificationsView();return;}
+  if(action==="notification"){
+    await api("/notifications/"+button.dataset.id+"/read","POST");document.querySelector("#notifications-dialog").close();
+    detailOpened=true;location.hash="screen="+screen+"&event="+button.dataset.event;await load(button.dataset.event);return;
+  }
+  if(action==="cancel"){requestConfirmation("這場將標記為取消，不能恢復。會寫入站內通知，但不代表球友已收到；請另行聯絡。確認取消？",()=>mutate("cancel"));return;}
+  if(action==="leave"){requestConfirmation("確認退出這場？你的名額可能立刻保留給候補。截止後退出導致人數不足時，整場會取消。",()=>mutate("leave"));return;}
+  if(action==="settle"){requestConfirmation("將依目前已簽到名單建立不可修改的費用分攤紀錄；這不會收款。請先確認出席是否完整。",()=>mutate("settle"));return;}
+  if(action==="export"){
+    const url=URL.createObjectURL(new Blob([JSON.stringify(selected.settlement,null,2)],{type:"application/json"}));
+    const anchor=document.createElement("a");anchor.href=url;anchor.download="rallyready-settlement.json";anchor.click();setTimeout(()=>URL.revokeObjectURL(url),1000);return;
+  }
+  await mutate(action,button.dataset.id);
+}
+document.addEventListener("click",async event=>{
+  const close=event.target.closest("[data-close]");if(close){document.getElementById(close.dataset.close).close();return;}
+  const navigation=event.target.closest("[data-screen]");
+  if(navigation){try{await setScreen(navigation.dataset.screen);}catch(error){toast(error.message);}return;}
+  const button=event.target.closest("[data-action]");if(!button)return;
+  button.disabled=true;try{await handleAction(button);}catch(error){toast(error.message);}finally{button.disabled=false;}
+});
+main.addEventListener("change",async event=>{
+  if(event.target.id==="filter-joinable")onlyJoinable=event.target.checked;
+  else if(event.target.id==="filter-past")includePast=event.target.checked;
+  else return;
+  try{location.hash="screen="+screen;await load(undefined,true);}catch(error){toast(error.message);}
+});
+main.addEventListener("input",event=>{
+  if(event.target.closest("#create-event"))formDraft=Object.fromEntries(new FormData(document.querySelector("#create-event")));
+  if(event.target.closest("#announcement-form"))announcementDrafts[selected.id]={text:event.target.value,request_id:makeRequestId()};
+});
 main.addEventListener("submit",async event=>{
   event.preventDefault();
-  if(event.target.id!=="create-event") return;
-  const button=event.submitter; button.disabled=true;
-  try {
-    if(!user) {dialog.showModal();return;}
+  const button=event.submitter;button.disabled=true;
+  try{
     const values=Object.fromEntries(new FormData(event.target));
-    for(const key of ["capacity","minimum","total_cost","offer_minutes"]) values[key]=Number(values[key]);
-    for(const key of ["starts_at","ends_at","cutoff_at"]) values[key]=new Date(values[key]).toISOString();
-    const result=await api("/events","POST",values);
-    location.hash="event="+result.id;
-    await load(result.id); toast("活動已建立。主辦人如要參加，也請按報名。");
-  }catch(error){toast(error.message);}
-  finally{button.disabled=false;}
-});
-main.addEventListener("click",async event=>{
-  const button=event.target.closest("[data-action]");
-  if(!button)return;
-  button.disabled=true;
-  try {
-    const action=button.dataset.action;
-    if(action==="auth")dialog.showModal();
-    else if(action==="select"){location.hash="event="+button.dataset.id;await load(button.dataset.id);}
-    else if(action==="refresh")await load();
-    else if(action==="notification"){
-      await api("/notifications/"+button.dataset.id+"/read","POST");
-      location.hash="event="+button.dataset.event; await load(button.dataset.event);
-    }else if(action==="share"){
-      const link=location.origin+"/#event="+selected.id;
-      try{await navigator.clipboard.writeText(link);toast("活動邀請連結已複製。");}catch{toast(link);}
-    }else{
-      if(!user){dialog.showModal();return;}
-      const endpoint=action==="check-in"?"check-in/"+button.dataset.id:action;
-      await api("/events/"+selected.id+"/"+endpoint,"POST");
-      await load(selected.id);
-      toast({join:"報名狀態已更新，請查看是否為候補。",leave:"已退出；空位將依序發出候補邀請。",accept:"候補名額已確認。",cancel:"活動已取消，通知已寫入站內。",settle:"結算完成，未進行任何收款。","check-in":"已記錄出席。"}[action]||"已更新");
+    if(event.target.id==="search-events"){searchText=values.query.trim();location.hash="screen="+screen;await load(undefined,true);return;}
+    if(!user){dialog.showModal();return;}
+    if(event.target.id==="create-event"){
+      formDraft={...values};
+      for(const key of ["capacity","minimum","total_cost","offer_minutes"])values[key]=Number(values[key]);
+      for(const key of ["starts_at","ends_at","cutoff_at"])values[key]=new Date(values[key]).toISOString();
+      const result=await api("/events","POST",values);
+      formDraft=null;screen="mine";detailOpened=true;location.hash="screen=mine&event="+result.id;await load(result.id);toast("球局已發布。主辦人要參加，也請自行報名。");
+    }else if(event.target.id==="announcement-form"){
+      const eventId=selected.id;
+      const draft=announcementDrafts[eventId]||{text:values.text,request_id:makeRequestId()};
+      announcementDrafts[eventId]=draft;
+      await api("/events/"+eventId+"/announcements","POST",draft);
+      delete announcementDrafts[eventId];await load(eventId);toast("公告已發布，已寫入參與者的站內通知。");
     }
-  }catch(error){toast(error.message);}
-  finally{button.disabled=false;}
+  }catch(error){toast(error.message);}finally{button.disabled=false;}
 });
-load().catch(error=>{main.innerHTML='<div class="panel empty">目前無法讀取活動，請確認服務啟動並連線後重新整理。</div>';toast(error.message);});
+setInterval(updateCounters,1000);
+setInterval(async()=>{
+  if(!user||document.visibilityState!=="visible"||document.querySelector("dialog[open]"))return;
+  try{
+    const notes=await api("/notifications");
+    const previous=new Set(notifications.map(note=>note.id));
+    const fresh=notes.filter(note=>!previous.has(note.id)&&!note.seen).length;
+    if(fresh){const button=document.querySelector("#live-update");button.textContent="有 "+fresh+" 則新通知・更新";button.classList.remove("hidden");}
+    const count=notes.filter(note=>!note.seen).length;
+    document.querySelector("#notification-count").textContent=count>9?"9+":String(count);
+    document.querySelector("#notification-count").classList.toggle("hidden",!count);
+  }catch{}
+},30000);
+load().catch(error=>{loading=false;render();toast(error.message);});
 

@@ -1,0 +1,7 @@
+{
+  "name": "rallyready-ui-tests",
+  "version": "1.1.0",
+  "private": true,
+  "scripts": {"test": "node --test test_browser.mjs test_ui.mjs"},
+  "devDependencies": {"linkedom": "0.18.13"}
+}

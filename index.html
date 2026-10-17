@@ -1,26 +1,13 @@
 <!doctype html>
 <html lang="zh-Hant">
-<head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="theme-color" content="#2258aa">
-<meta name="description" content="校園臨打成團、限時候補與出席分攤">
-<title>RallyReady · 揪團，不再靠猜</title>
-<link rel="manifest" href="/manifest.webmanifest"><link rel="icon" href="/icon.svg">
-<link rel="apple-touch-icon" href="/icon-192.png"><link rel="stylesheet" href="/styles.css">
-<script src="/app.js" defer></script>
-</head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#141e1b"><meta name="description" content="找到下一場校園臨打，清楚確認成團、候補與出席分攤。"><title>RallyReady｜留一場球給自己</title><link rel="manifest" href="/manifest.webmanifest"><link rel="icon" href="/icon.svg"><link rel="apple-touch-icon" href="/icon-192.png"><link rel="stylesheet" href="/styles.css"><script src="/app.js" defer></script></head>
 <body>
-<div id="offline" class="offline hidden">目前離線 · 只保留操作介面，不會快取個人資料或代送報名。</div>
-<header><a class="brand" href="/">Rally<span>Ready.</span></a>
-<span class="subtitle">MAKE THE GAME HAPPEN</span>
-<nav aria-label="帳號操作"><button id="install" class="secondary hidden">安裝</button><span id="identity" class="identity">訪客</span><button id="auth">登入 / 註冊</button><button id="logout" class="secondary hidden">登出</button></nav></header>
-<main><div class="empty">正在讀取資料…</div></main>
-<footer>不代收款、不保證出席；站內通知並非背景推播。<br>原創 AI 協作作品集初版 · 可自架 · PWA 安裝方式依瀏覽器而異</footer>
-<dialog aria-labelledby="auth-title"><h2 id="auth-title">從一次成團開始</h2><p class="muted">示範用帳號，不需要提供電話或電子郵件。</p>
-<form id="auth-form" class="stack"><label>帳號（3–32 字，英數或底線）<input name="username" autocomplete="username" pattern="[a-zA-Z0-9_]{3,32}" required></label>
-<label>密碼（至少 10 字，請勿重用真實密碼）<input name="password" type="password" minlength="10" maxlength="128" autocomplete="current-password" required></label>
-<label>暱稱（註冊使用）<input name="nickname" maxlength="30" value="新朋友" required></label>
-<div class="row"><button type="submit" data-mode="login">登入</button><button type="submit" data-mode="register" class="secondary">建立帳號</button><button type="button" id="close-auth" class="link">關閉</button></div></form></dialog>
+<a class="skip" href="#workspace">跳到主要內容</a><div id="offline" class="offline hidden">目前離線。報名不會排程代送，連線後請先更新狀態。</div>
+<header class="topbar"><a class="brand" href="/"><span class="brand-mark" aria-hidden="true">R↗</span><span>RALLY<span class="brand-light">READY</span><small>校園臨打・成團看板</small></span></a><nav aria-label="球局導覽"><button data-screen="discover" aria-current="page">找球局</button><button data-screen="mine">我的球局</button><button data-screen="create">＋ 開一場</button></nav><div class="account-nav"><button id="live-update" class="update-pill hidden" data-action="refresh">有新狀態</button><button class="icon-button" data-action="notifications" aria-label="我的站內通知">◎<span id="notification-count" class="notification-count hidden">0</span></button><button id="install" class="quiet hidden">安裝</button><span id="identity">訪客</span><button id="auth" class="outline small">登入 / 註冊</button><button id="logout" class="quiet hidden">登出</button></div></header>
+<main id="workspace"><p class="empty">正在整理下一場球局…</p></main><footer><strong>RALLYREADY</strong><span>先確認，再出門。</span><span>虛構場地不代表真實預約 · 站內通知不是背景推播 · 不代收款</span></footer>
+<dialog id="auth-dialog" aria-labelledby="auth-title"><button id="close-auth" type="button" class="dialog-close" aria-label="關閉登入">×</button><p class="eyebrow">READY WHEN YOU ARE</p><h2 id="auth-title">下一場，算你一個。</h2><p class="muted">建立示範帳號，無需學號、電話或 Email。請勿重用真實密碼。</p><form id="auth-form" class="form-stack"><label>帳號（英數或底線）<input name="username" autocomplete="username" pattern="[a-zA-Z0-9_]{3,32}" minlength="3" maxlength="32" required></label><label>密碼（至少 10 字）<input name="password" type="password" minlength="10" maxlength="128" autocomplete="current-password" required></label><label>暱稱（註冊時使用）<input name="nickname" maxlength="30" value="新朋友" required></label><div class="button-row"><button data-mode="login">登入</button><button class="outline" data-mode="register">建立帳號</button></div></form></dialog>
+<dialog id="notifications-dialog" aria-labelledby="notes-title"></dialog>
+<dialog id="confirm-dialog" aria-labelledby="confirm-title"><p class="eyebrow">ONE LAST CHECK</p><h2 id="confirm-title">確認這個操作</h2><p id="confirm-description"></p><div class="button-row"><button id="confirm-yes" type="button">確認</button><button type="button" class="outline" data-close="confirm-dialog">先不要</button></div></dialog>
 <div id="message" role="alert" aria-live="polite"></div>
 </body></html>
 

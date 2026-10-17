@@ -1,4 +1,4 @@
-const CACHE = "rallyready-shell-v1";
+const CACHE = "rallyready-shell-v2";
 const SHELL = ["/", "/app.js", "/styles.css", "/manifest.webmanifest", "/icon.svg", "/icon-192.png", "/icon-512.png"];
 self.addEventListener("install", event => event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(SHELL))));
 self.addEventListener("activate", event => event.waitUntil(caches.keys().then(keys =>

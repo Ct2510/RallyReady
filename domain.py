@@ -8,6 +8,12 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from common import dump
 
 
+class AnnouncementInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    text: str = Field(min_length=3, max_length=500)
+    request_id: str = Field(pattern=r"^[a-zA-Z0-9-]{16,80}$")
+
+
 class EventInput(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     title: str = Field(min_length=1, max_length=70)
